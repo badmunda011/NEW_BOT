@@ -1,3 +1,4 @@
+from config import *
 from config import SUDO_USER
 from typing import Dict, List, Union, Callable
 
