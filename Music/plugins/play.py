@@ -324,25 +324,7 @@ async def skip(_, message: Message):
 
 # --------------------------------------------------------------------------------------------------------- #
 
-
-@pytgcalls.on_stream_end()
-async def on_stream_end(_, update: Update) -> None:
-    chat_id = update.chat_id
-    rq.task_done(chat_id)
-
-    if rq.is_empty(chat_id):
-        await pytgcalls.leave_group_call(chat_id)
-    else:
-        await pytgcalls.change_stream(
-            chat_id, 
-            AudioPiped(
-                
-                    rq.get(chat_id)["file"],
-                ),
-            
-        )
-            
-# --------------------------------------------------------------------------------------------------------- #
+----------------------------------------------------------------------------------------------- #
 
 @hellbot.app.on_message(
     filters.command(["join",])
