@@ -16,7 +16,14 @@ from Music.core.utils import get_audio_stream, get_video_stream
 from pytgcalls.types import Update
 from pytgcalls.types import AudioPiped, AudioVideoPiped, AudioParameters
 from Music.core.thumb_func import transcode, convert_seconds, time_to_seconds, generate_cover
-
+from Music.core.calls import hellmusic
+from Music.core.clients import hellbot
+from Music.core.database import db
+from Music.core.decorators import UserWrapper, check_mode
+from Music.helpers.buttons import Buttons
+from Music.helpers.formatters import formatter
+from Music.helpers.strings import TEXTS
+from Music.helpers.users import MusicUser
 
 
 
