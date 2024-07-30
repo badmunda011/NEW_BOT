@@ -14,7 +14,7 @@ from Music.core import utils as rq
 from Music.core.utils import DurationLimitError
 from Music.core.utils import get_audio_stream, get_video_stream
 from pytgcalls.types import Update
-from pytgcalls.types import AudioPiped, AudioVideoPiped, AudioQuality, AudioParameters
+from pytgcalls.types import AudioPiped, AudioVideoPiped, AudioParameters
 from Music.core.thumb_func import transcode, convert_seconds, time_to_seconds, generate_cover
 
 
