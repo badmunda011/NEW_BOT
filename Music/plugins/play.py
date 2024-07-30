@@ -1,229 +1,437 @@
-import asyncio
-import random
-
-from pyrogram import filters
-from pyrogram.types import CallbackQuery, InlineKeyboardMarkup, Message
-
+import os, aiofiles, aiohttp, ffmpeg, random, re
+import requests
+from Music.core.admin_func import authorized_users, admins as a, set_admins as set
 from config import Config
-from Music.core.clients import hellbot
-from Music.core.database import db
-from Music.core.decorators import AuthWrapper, PlayWrapper, UserWrapper, check_mode
-from Music.helpers.buttons import Buttons
-from Music.helpers.formatters import formatter
-from Music.helpers.strings import TEXTS
-from Music.utils.pages import MakePages
-from Music.utils.play import player
-from Music.utils.queue import Queue
-from Music.utils.thumbnail import thumb
-from Music.utils.youtube import ytube
+from pytgcalls import pytgcalls
+from typing import Callable
+from config import BOT_USERNAME
+from pyrogram import filters, Client
+from pyrogram.types import *
+from youtube_search import YoutubeSearch
+from asyncio.queues import QueueEmpty
+from pyrogram.errors import UserAlreadyParticipant
+from Music.core import utils as rq
+from Music.core.utils import DurationLimitError
+from Music.core.utils import get_audio_stream, get_video_stream
+from pytgcalls.types import Update
+from pytgcalls.types import AudioPiped, AudioVideoPiped, AudioQuality, AudioParameters
+from Music.core.thumb_func import transcode, convert_seconds, time_to_seconds, generate_cover
 
+
+
+
+DURATION_LIMIT = 300
+
+keyboard = InlineKeyboardMarkup([
+        [
+                InlineKeyboardButton(" •┈┈┈•..........⬬⭒💘⭒⬬.........•┈┈┈• ", url=f"https://t.me/{BOT_USERNAME}?startgroup=true")
+        ],
+        [InlineKeyboardButton(" ◁ ", url=f"https://t.me/ll_BAD_ABOUT_ll"),
+         InlineKeyboardButton(" ❚❚ ", url=f"https://t.me/ll_THE_BAD_BOT_ll"),
+         InlineKeyboardButton(" ▷ ", url=f"https://t.me/ll_BAD_MUNDA_WORLD_ll")
+        ],
+        [
+            InlineKeyboardButton(" ᴄʟᴏsᴇ ", callback_data="close_data"),
+        ]
+])
+
+local_thumb = [
+"https://graph.org/file/e3fa9ab16ebefbfdd29d9.jpg",
+"https://graph.org/file/5938774f48c1f019c73f7.jpg",
+"https://graph.org/file/b13a16734bab174f58482.jpg",
+"https://graph.org/file/2deb4e5cbba862f2d5457.jpg",
+]
+
+
+# --------------------------------------------------------------------------------------------------------- #
+
+que = {}
+chat_id = None
+useer = "NaN"
+
+# --------------------------------------------------------------------------------------------------------- #
 
 @hellbot.app.on_message(
-    filters.command(["play", "vplay", "fplay", "fvplay"])
+    filters.command(["play",])
     & filters.group
     & ~Config.BANNED_USERS
 )
-@check_mode
-@PlayWrapper
-async def play_music(_, message: Message, context: dict):
-    user_name = message.from_user.first_name
-    user_id = message.from_user.id
-    if not await db.is_user_exist(user_id):
-        await db.add_user(user_id, user_name)
-    else:
-        try:
-            await db.update_user(user_id, "user_name", user_name)
-        except:
-            pass
-    hell = await message.reply_text("Processing ...")
-    # initialise variables
-    video, force, url, tgaud, tgvid = context.values()
-    play_limit = formatter.mins_to_secs(f"{Config.PLAY_LIMIT}:00")
-
-    # if the user replied to a message and that message is an audio file
-    if tgaud:
-        size_check = formatter.check_limit(tgaud.file_size, Config.TG_AUDIO_SIZE_LIMIT)
-        if not size_check:
-            return await hell.edit(
-                f"Audio file size exceeds the size limit of {formatter.bytes_to_mb(Config.TG_AUDIO_SIZE_LIMIT)}MB."
-            )
-        time_check = formatter.check_limit(tgaud.duration, play_limit)
-        if not time_check:
-            return await hell.edit(
-                f"Audio duration limit of {Config.PLAY_LIMIT} minutes exceeded."
-            )
-        await hell.edit("Downloading ...")
-        file_path = await hellbot.app.download_media(message.reply_to_message)
-        context = {
-            "chat_id": message.chat.id,
-            "user_id": message.from_user.id,
-            "duration": formatter.secs_to_mins(tgaud.duration),
-            "file": file_path,
-            "title": "Telegram Audio",
-            "user": message.from_user.mention,
-            "video_id": "telegram",
-            "vc_type": "voice",
-            "force": force,
-        }
-        await player.play(hell, context)
-        return
-
-    # if the user replied to a message and that message is a video file
-    if tgvid:
-        size_check = formatter.check_limit(tgvid.file_size, Config.TG_VIDEO_SIZE_LIMIT)
-        if not size_check:
-            return await hell.edit(
-                f"Video file size exceeds the size limit of {formatter.bytes_to_mb(Config.TG_VIDEO_SIZE_LIMIT)}MB."
-            )
-        time_check = formatter.check_limit(tgvid.duration, play_limit)
-        if not time_check:
-            return await hell.edit(
-                f"Audio duration limit of {Config.PLAY_LIMIT} minutes exceeded."
-            )
-        await hell.edit("Downloading ...")
-        file_path = await hellbot.app.download_media(message.reply_to_message)
-        context = {
-            "chat_id": message.chat.id,
-            "user_id": message.from_user.id,
-            "duration": formatter.secs_to_mins(tgvid.duration),
-            "file": file_path,
-            "title": "Telegram Video",
-            "user": message.from_user.mention,
-            "video_id": "telegram",
-            "vc_type": "video",
-            "force": force,
-        }
-        await player.play(hell, context)
-        return
-
-    # if the user replied to or sent a youtube link
-    if url:
-        if not ytube.check(url):
-            return await hell.edit("Invalid YouTube URL.")
-        if "playlist" in url:
-            await hell.edit("Processing the playlist ...")
-            song_list = await ytube.get_playlist(url)
-            random.shuffle(song_list)
-            context = {
-                "user_id": message.from_user.id,
-                "user_mention": message.from_user.mention,
-            }
-            await player.playlist(hell, context, song_list, video)
-            return
-        try:
-            await hell.edit("Searching ...")
-            result = await ytube.get_data(url, False)
-        except Exception as e:
-            return await hell.edit(f"**Error:**\n`{e}`")
-        context = {
-            "chat_id": message.chat.id,
-            "user_id": message.from_user.id,
-            "duration": result[0]["duration"],
-            "file": result[0]["id"],
-            "title": result[0]["title"],
-            "user": message.from_user.mention,
-            "video_id": result[0]["id"],
-            "vc_type": "video" if video else "voice",
-            "force": force,
-        }
-        await player.play(hell, context)
-        return
-
-    # if the user sent a query
-    query = message.text.split(" ", 1)[1]
+async def play(_, message):
+    global que
+    global useer    
+    chat_id = message.chat.id  
+    user_name = message.from_user.mention                
+    msg = await message.reply("**🔎 sᴇᴀʀᴄʜɪɴɢ...**") 
     try:
-        await hell.edit("Searching ...")
-        result = await ytube.get_data(query, False)
-    except Exception as e:
-        return await hell.edit(f"**Error:**\n`{e}`")
-    context = {
-        "chat_id": message.chat.id,
-        "user_id": message.from_user.id,
-        "duration": result[0]["duration"],
-        "file": result[0]["id"],
-        "title": result[0]["title"],
-        "user": message.from_user.mention,
-        "video_id": result[0]["id"],
-        "vc_type": "video" if video else "voice",
-        "force": force,
-    }
-    await player.play(hell, context)
-
-
-@hellbot.app.on_message(
-    filters.command(["current", "playing"]) & filters.group & ~Config.BANNED_USERS
-)
-@UserWrapper
-async def playing(_, message: Message):
-    chat_id = message.chat.id
-    is_active = await db.is_active_vc(chat_id)
-    if not is_active:
-        return await message.reply_text("No active voice chat found here.")
-    que = Queue.get_current(chat_id)
-    if not que:
-        return await message.reply_text("Nothing is playing here.")
-    photo = thumb.generate((359), (297, 302), que["video_id"])
-    btns = Buttons.player_markup(chat_id, que["video_id"], hellbot.app.username)
-    to_send = TEXTS.PLAYING.format(
-        hellbot.app.mention,
-        que["title"],
-        que["duration"],
-        que["user"],
-    )
-    if photo:
-        sent = await message.reply_photo(
-            photo, caption=to_send, reply_markup=InlineKeyboardMarkup(btns)
-        )
-    else:
-        sent = await message.reply_text(
-            to_send, reply_markup=InlineKeyboardMarkup(btns)
-        )
-    previous = Config.PLAYER_CACHE.get(chat_id)
-    if previous:
+        user = await userbot.get_me()
+        await _.get_chat_member(chat_id, user.id)
+    except:      
         try:
-            await previous.delete()
-        except Exception:
+            invitelink = await _.export_chat_invite_link(chat_id)
+        except Exception:    
+            await msg.edit_text("**» ᴀᴅᴅ ᴍᴇ ᴀs ᴀᴅᴍɪɴ ɪɴ ʏᴏᴜʀ ɢʀᴏᴜᴘ ғɪʀsᴛ.**")
+        try:
+            await userbot.join_chat(invitelink)
+            await userbot.send_message(message.chat.id, text="** ✅ ᴀssɪsᴛᴀɴᴛ ᴊᴏɪɴᴇᴅ ᴛʜɪs ɢʀᴏᴜᴘ ғᴏʀ ᴘʟᴀʏ ᴍᴜsɪᴄ.**")
+        except UserAlreadyParticipant:            
             pass
-    Config.PLAYER_CACHE[chat_id] = sent
+        except Exception as e:
+            await msg.edit_text(f"**ᴘʟᴇᴀsᴇ ᴍᴀɴᴜᴀʟʟʏ ᴀᴅᴅ ᴀssɪsᴛᴀɴᴛ ᴏʀ ᴄᴏɴᴛᴀᴄᴛ [🍹𝆺𝅥⃝🌸 ‌⃪‌ ᷟ🦋ᴹᵁˢᴵᶜ ᥫ᭡𓆩ᴾᴸᴬᵞᴱᴿ𓆪🦋☕︎](https://t.me/II_BAD_MUNDA_II)** ")
+                            
+    audio = ((message.reply_to_message.audio or message.reply_to_message.voice) if message.reply_to_message else None)
+   
+    if audio:
+        if round(audio.duration / 60) > DURATION_LIMIT:
+            raise DurationLimitError(
+                f"** sᴏɴɢs ʟᴏɴɢᴇʀ ᴛʜᴀɴ {DURATION_LIMIT} ᴍɪɴᴜᴛᴇs ᴀʀᴇ ɴᴏᴛ ᴀʟʟᴏᴡᴇᴅ ᴛᴏ ᴘʟᴀʏ.**"
+            )
+
+        file_path = await message.reply_to_message.download()
+        title = audio.file_name 
+        link = "https://t.me/ShizuRank_Bot"
+        thumbnail = random.choice(local_thumb)
+        duration = round(audio.duration / 60)
+        views = "Locally added"
+        await generate_cover(user_name, title, views, duration, thumbnail)
+       
+            
+    
+    else:
+        if len(message.command) < 2:
+            await msg.edit_text("💌 **ᴜsᴀɢᴇ: /ᴘʟᴀʏ ɢɪᴠᴇ ᴀ ᴛɪᴛʟᴇ sᴏɴɢ ᴛᴏ ᴘʟᴀʏ ᴍᴜsɪᴄ.**")
+        else:
+            await msg.edit_text("**🎧 𝐒ƚαяᴛҽԃ 𝐏ℓαყιɳɠ вαႦყ...**")
+                
+        query = message.text.split(None, 1)[1]
+            
+        try:
+            results = YoutubeSearch(query, max_results=1).to_dict()
+            link = f"https://youtube.com{results[0]['url_suffix']}"
+            title = results[0]["title"][:40]
+            thumbnail = results[0]["thumbnails"][0]
+            thumb_name = f"{title}.jpg"
+            thumb = requests.get(thumbnail, allow_redirects=True)
+            open(thumb_name, "wb").write(thumb.content)
+            duration = results[0]["duration"]
+            url_suffix = results[0]["url_suffix"]
+            views = results[0]["views"]
+            
+            secmul, dur, dur_arr = 1, 0, duration.split(":")
+            for i in range(len(dur_arr) - 1, -1, -1):
+                dur += int(dur_arr[i]) * secmul
+                secmul *= 60
+
+
+        except Exception:
+            await msg.edit("**sᴏɴɢ ɴᴏᴛ ғᴏᴜɴᴅ, ᴛʀʏ sᴇᴀʀᴄʜɪɴɢ ᴡɪᴛʜ sᴏɴɢ ɴᴀᴍᴇ.**")
+            return
+
+        if (dur / 60) > DURATION_LIMIT:
+            await msg.edit(f"**sᴏɴɢs ʟᴏɴɢᴇʀ ᴛʜᴀɴ {DURATION_LIMIT} ᴍɪɴᴜᴛᴇs ᴀʀᴇ ɴᴏᴛ ᴀʟʟᴏᴡᴇᴅ ᴛᴏ ᴘʟᴀʏ.**")
+            return
+
+        await generate_cover(user_name, title, views, duration, thumbnail)
+        file_path = await get_audio_stream(link)
+            
+    ACTV_CALLS = []
+    chat_id = message.chat.id
+    for x in pytgcalls.active_calls:
+        ACTV_CALLS.append(int(x.chat_id))
+    if int(chat_id) in ACTV_CALLS:
+        position = await rq.put(chat_id, file=file_path)
+        await message.reply_photo(
+            photo="final.png",
+            caption=f"**➻ ᴛʀᴀᴄᴋ ᴀᴅᴅᴇᴅ ᴛᴏ ǫᴜᴇᴜᴇ » {position} **\n\n**🏷️ ɴᴀᴍᴇ :**[{title[:15]}]({link})\n⏰** ᴅᴜʀᴀᴛɪᴏɴ :** `{duration}` **ᴍɪɴᴜᴛᴇs**\n👀 ** ʀᴇǫᴜᴇsᴛᴇᴅ ʙʏᴇ : **{user_name}",
+            reply_markup=keyboard,
+        )
+       
+    else:
+        await pytgcalls.join_group_call(
+            chat_id,
+            AudioPiped(
+                file_path,
+                AudioParameters.from_quality(AudioQuality.STUDIO),
+            ),
+        )
+        await message.reply_photo(
+            photo="final.png",
+            reply_markup=keyboard,
+            caption=f"**➻ sᴛᴀʀᴇᴅ sᴛʀᴇᴀᴍɪɴɢ**\n**🏷️ ɴᴀᴍᴇ : **[{title[:15]}]({link})\n⏰ ** ᴅᴜʀᴀᴛɪᴏɴ :** `{duration}` ᴍɪɴᴜᴛᴇs\n👀 ** ʀᴇǫᴜᴇsᴛᴇᴅ ʙʏ : **{user_name}\n",
+           )
+
+    os.remove("final.png")
+    return await msg.delete()
+
+
+
+# --------------------------------------------------------------------------------------------------------- #
+
+@hellbot.app.on_message(
+    filters.command(["vplay",])
+    & filters.group
+    & ~Config.BANNED_USERS
+)
+async def vplay(_, message):
+    global que
+    global useer    
+    chat_id = message.chat.id  
+    user_name = message.from_user.mention                
+    msg = await message.reply("**🔎 sᴇᴀʀᴄʜɪɴɢ...**") 
+    try:
+        user = await userbot.get_me()
+        await _.get_chat_member(chat_id, user.id)
+    except:      
+        try:
+            invitelink = await _.export_chat_invite_link(chat_id)
+        except Exception:    
+            await msg.edit_text("**» ᴀᴅᴅ ᴍᴇ ᴀs ᴀᴅᴍɪɴ ɪɴ ʏᴏᴜʀ ɢʀᴏᴜᴘ ғɪʀsᴛ.**")
+        try:
+            await userbot.join_chat(invitelink)
+            await userbot.send_message(message.chat.id, text="** ✅ ᴀssɪsᴛᴀɴᴛ ᴊᴏɪɴᴇᴅ ᴛʜɪs ɢʀᴏᴜᴘ ғᴏʀ ᴘʟᴀʏ ᴍᴜsɪᴄ.**")
+        except UserAlreadyParticipant:            
+            pass
+        except Exception as e:
+            await msg.edit_text(f"**ᴘʟᴇᴀsᴇ ᴍᴀɴᴜᴀʟʟʏ ᴀᴅᴅ ᴀssɪsᴛᴀɴᴛ ᴏʀ ᴄᴏɴᴛᴀᴄᴛ [🍹𝆺𝅥⃝🌸 ‌⃪‌ ᷟ🦋ᴹᵁˢᴵᶜ ᥫ᭡𓆩ᴾᴸᴬᵞᴱᴿ𓆪🦋☕︎](https://t.me/II_BAD_MUNDA_II)** ")
+                            
+    video = (message.reply_to_message.video if message.reply_to_message else None)
+   
+    if video:
+        if round(video.duration / 60) > DURATION_LIMIT:
+            raise DurationLimitError(
+                f"** sᴏɴɢs ʟᴏɴɢᴇʀ ᴛʜᴀɴ {DURATION_LIMIT} ᴍɪɴᴜᴛᴇs ᴀʀᴇ ɴᴏᴛ ᴀʟʟᴏᴡᴇᴅ ᴛᴏ ᴘʟᴀʏ.**"
+            )
+
+        file_path = await message.reply_to_message.download()
+        title = video.file_name 
+        link = "https://t.me/ShizuRank_Bot"
+        thumbnail = random.choice(local_thumb)
+        duration = round(video.duration / 60)
+        views = "Locally added"
+        await generate_cover(user_name, title, views, duration, thumbnail)
+       
+            
+    
+    else:
+        if len(message.command) < 2:
+            await msg.edit_text("💌 **ᴜsᴀɢᴇ: /vᴘʟᴀʏ ɢɪᴠᴇ ᴀ ᴛɪᴛʟᴇ sᴏɴɢ ᴛᴏ ᴘʟᴀʏ ᴍᴜsɪᴄ.**")
+        else:
+            await msg.edit_text("**🎧 𝐒ƚαяᴛҽԃ 𝐏ℓαყιɳɠ вαႦყ...**")
+                
+        query = message.text.split(None, 1)[1]
+            
+        try:
+            results = YoutubeSearch(query, max_results=1).to_dict()
+            link = f"https://youtube.com{results[0]['url_suffix']}"
+            title = results[0]["title"][:40]
+            thumbnail = results[0]["thumbnails"][0]
+            thumb_name = f"{title}.jpg"
+            thumb = requests.get(thumbnail, allow_redirects=True)
+            open(thumb_name, "wb").write(thumb.content)
+            duration = results[0]["duration"]
+            url_suffix = results[0]["url_suffix"]
+            views = results[0]["views"]
+            
+            secmul, dur, dur_arr = 1, 0, duration.split(":")
+            for i in range(len(dur_arr) - 1, -1, -1):
+                dur += int(dur_arr[i]) * secmul
+                secmul *= 60
+
+
+        except Exception:
+            await msg.edit("**sᴏɴɢ ɴᴏᴛ ғᴏᴜɴᴅ, ᴛʀʏ sᴇᴀʀᴄʜɪɴɢ ᴡɪᴛʜ sᴏɴɢ ɴᴀᴍᴇ.**")
+            return
+
+        if (dur / 60) > DURATION_LIMIT:
+            await msg.edit(f"**sᴏɴɢs ʟᴏɴɢᴇʀ ᴛʜᴀɴ {DURATION_LIMIT} ᴍɪɴᴜᴛᴇs ᴀʀᴇ ɴᴏᴛ ᴀʟʟᴏᴡᴇᴅ ᴛᴏ ᴘʟᴀʏ.**")
+            return
+
+        await generate_cover(user_name, title, views, duration, thumbnail)
+        file_path = await get_video_stream(link)
+            
+    ACTV_CALLS = []
+    chat_id = message.chat.id
+    for x in pytgcalls.active_calls:
+        ACTV_CALLS.append(int(x.chat_id))
+    if int(chat_id) in ACTV_CALLS:
+        position = await rq.put(chat_id, file=file_path)
+        await message.reply_photo(
+            photo="final.png",
+            caption=f"**➻ ᴛʀᴀᴄᴋ ᴀᴅᴅᴇᴅ ᴛᴏ ǫᴜᴇᴜᴇ » {position} **\n\n**🏷️ ɴᴀᴍᴇ :**[{title[:15]}]({link})\n⏰** ᴅᴜʀᴀᴛɪᴏɴ :** `{duration}` **ᴍɪɴᴜᴛᴇs**\n👀 ** ʀᴇǫᴜᴇsᴛᴇᴅ ʙʏᴇ : **{user_name}",
+            reply_markup=keyboard,
+        )
+       
+    else:
+        await pytgcalls.join_group_call(
+            chat_id,
+            AudioVideoPiped(file_path)
+                 
+        )
+        await message.reply_photo(
+            photo="final.png",
+            reply_markup=keyboard,
+            caption=f"**➻ sᴛᴀʀᴇᴅ sᴛʀᴇᴀᴍɪɴɢ**\n**🏷️ ɴᴀᴍᴇ : **[{title[:15]}]({link})\n⏰ ** ᴅᴜʀᴀᴛɪᴏɴ :** `{duration}` ᴍɪɴᴜᴛᴇs\n👀 ** ʀᴇǫᴜᴇsᴛᴇᴅ ʙʏ : **{user_name}\n",
+           )
+
+    os.remove("final.png")
+    return await msg.delete()
+
+
+
+
+
+
+# --------------------------------------------------------------------------------------------------------- #
+
+@hellbot.app.on_message(
+    filters.command(["skip",])
+    & filters.group
+    & ~Config.BANNED_USERS
+)
+async def skip(_, message: Message):
+    ACTV_CALLS = []
+    print(ACTV_CALLS)
+    chat_id = message.chat.id
+    for x in pytgcalls.active_calls:
+        ACTV_CALLS.append(int(x.chat_id))
+    
+    if chat_id not in ACTV_CALLS:
+        await message.reply_text("**ᴍᴜsɪᴄ ᴘʟᴀʏᴇʀ ɴᴏᴛʜɪɴɢ ɪs ᴘʟᴀʏɪɴɢ ᴛᴏ sᴋɪᴘ.**")
+    else:
+        rq.task_done(chat_id)
+        
+        if rq.is_empty(chat_id):
+            await pytgcalls.leave_group_call(chat_id)
+        else:
+            await pytgcalls.change_stream(
+                    chat_id,
+                    AudioPiped(
+                        rq.get(chat_id)["file"],
+                    ),
+                )
+            await message.reply_text("**ᴍᴜsɪᴄ ᴘʟᴀʏᴇʀ sᴋɪᴘᴘᴇᴅ ᴛʜᴇ sᴏɴɢ.**")
+
+
+
+
+    
+
+# --------------------------------------------------------------------------------------------------------- #
+
+
+@pytgcalls.on_stream_end()
+async def on_stream_end(_, update: Update) -> None:
+    chat_id = update.chat_id
+    rq.task_done(chat_id)
+
+    if rq.is_empty(chat_id):
+        await pytgcalls.leave_group_call(chat_id)
+    else:
+        await pytgcalls.change_stream(
+            chat_id, 
+            AudioPiped(
+                
+                    rq.get(chat_id)["file"],
+                ),
+            
+        )
+            
+# --------------------------------------------------------------------------------------------------------- #
+
+@hellbot.app.on_message(
+    filters.command(["join",])
+    & filters.group
+    & ~Config.BANNED_USERS
+)
+@authorized_users
+async def join_userbot(_,msg):
+  chat_id = msg.chat.id
+  invitelink = await app.export_chat_invite_link(chat_id)
+  await userbot.join_chat(invitelink)
+  await msg.reply("**ᴀssɪsᴛᴀɴᴛ sᴜᴄᴄᴇssғᴜʟʟʏ ᴊᴏɪɴ.**")
+
+
+# --------------------------------------------------------------------------------------------------------- #
+
+@hellbot.app.on_message(
+    filters.command(["pause",])
+    & filters.group
+    & ~Config.BANNED_USERS
+)    
+@authorized_users
+async def pause(_, msg):
+    chat_id = msg.chat.id
+    if str(chat_id) in str(pytgcalls.active_calls):
+        await pytgcalls.pause_stream(chat_id)
+        await msg.reply(f"ᴍᴜsɪᴄ ᴘʟᴀʏᴇʀ sᴜᴄᴄᴇssғᴜʟʟʏ ᴘᴀᴜsᴇᴅ\nᴘᴀᴜsᴇᴅ ʙʏ {msg.from_user.mention}")
+    else:
+        await msg.reply(f"sᴏʀʀʏ {msg.from_user.mention}, ɪ ᴄᴀɴ'ᴛ ᴘᴀᴜsᴇᴅ ʙᴇᴄᴀᴜsᴇ ᴛʜᴇʀᴇ ɪs ɴᴏ ᴍᴜsɪᴄ ᴘʟᴀʏɪɴɢ ᴏɴ ᴛʜᴇ ᴠᴏɪᴄᴇ ᴄʜᴀᴛ.")
+
+# --------------------------------------------------------------------------------------------------------- #
 
 
 @hellbot.app.on_message(
-    filters.command(["queue", "que", "q"]) & filters.group & ~Config.BANNED_USERS
-)
-@UserWrapper
-async def queued_tracks(_, message: Message):
-    hell = await message.reply_text("Getting Queue...")
-    chat_id = message.chat.id
-    is_active = await db.is_active_vc(chat_id)
-    if not is_active:
-        return await hell.edit_text("No active voice chat found here.")
-    collection = Queue.get_queue(chat_id)
-    if not collection:
-        return await hell.edit_text("Nothing is playing here.")
-    await MakePages.queue_page(hell, collection, 0, 0, True)
-
-
-@hellbot.app.on_message(filters.command(["clean", "reload"]) & ~Config.BANNED_USERS)
-@AuthWrapper
-async def clean_queue(_, message: Message):
-    Queue.clear_queue(message.chat.id)
-    hell = await message.reply_text("**Cleared Queue.**")
-    await asyncio.sleep(10)
-    await hell.delete()
-
-
-@hellbot.app.on_callback_query(filters.regex(r"queue") & ~Config.BANNED_USERS)
-async def queued_tracks_cb(_, cb: CallbackQuery):
-    _, action, page = cb.data.split("|")
-    key = int(page)
-    collection = Queue.get_queue(cb.message.chat.id)
-    length, _ = formatter.group_the_list(collection, 5, True)
-    length -= 1
-    if key == 0 and action == "prev":
-        new_page = length
-    elif key == length and action == "next":
-        new_page = 0
+    filters.command(["resume",])
+    & filters.group
+    & ~Config.BANNED_USERS
+) 
+@authorized_users
+async def resume(_, msg):
+    chat_id = msg.chat.id
+    if str(chat_id) in str(pytgcalls.active_calls):
+        await pytgcalls.resume_stream(chat_id)
+        await msg.reply(f"ᴍᴜsɪᴄ ᴘʟᴀʏᴇʀ sᴜᴄᴄᴇssғᴜʟʟʏ ʀᴇsᴜᴍᴇ\nʀᴇsᴜᴍᴇᴅ ʙʏ {msg.from_user.mention}")
     else:
-        new_page = key + 1 if action == "next" else key - 1
-    index = new_page * 5
-    await MakePages.queue_page(cb.message, collection, new_page, index, True)
+        await msg.reply(f"sᴏʀʀʏ {msg.from_user.mention}, ɪ ᴄᴀɴ'ᴛ ʀᴇsᴜᴍᴇ ʙᴇᴄᴀᴜsᴇ ᴛʜᴇʀᴇ ɪs ɴᴏ ᴍᴜsɪᴄ ᴘʟᴀʏɪɴɢ ᴏɴ ᴛʜᴇ ᴠᴏɪᴄᴇ ᴄʜᴀᴛ.")
+
+
+# --------------------------------------------------------------------------------------------------------- #
+
+
+@hellbot.app.on_message(
+    filters.command(["end",])
+    & filters.group
+    & ~Config.BANNED_USERS
+)
+@authorized_users
+async def stop(_, msg):
+    chat_id = msg.chat.id
+    if str(chat_id) in str(pytgcalls.active_calls):
+        await pytgcalls.leave_group_call(chat_id)
+        await msg.reply(f"ᴍᴜsɪᴄ ᴘʟᴀʏᴇʀ sᴜᴄᴄᴇssғᴜʟʟʏ ᴇɴᴅᴇᴅ sᴏɴɢ\nᴇɴᴅᴇᴅ ʙʏ {msg.from_user.mention}")
+    else:
+        await msg.reply(f"sᴏʀʀʏ {msg.from_user.mention}, ɪ ᴄᴀɴ'ᴛ ᴇɴᴅ ᴍᴜsɪᴄ ʙᴇᴄᴀᴜsᴇ ɴᴏ ᴍᴜsɪᴄ ᴘʟᴀʏɪɴɢ ᴏɴ ᴛʜᴇ ᴠᴏɪᴄᴇ ᴄʜᴀᴛ.")
+
+
+# --------------------------------------------------------------------------------------------------------- #
+
+
+@hellbot.app.on_message(
+    filters.command(["leavevc",])
+    & filters.group
+    & ~Config.BANNED_USERS
+)
+@authorized_users
+async def leavevc(_, msg):
+    chat_id = msg.chat.id
+    await pytgcalls.leave_group_call(chat_id)
+    await msg.reply(f"ᴍᴜsɪᴄ ᴘʟᴀʏᴇʀ sᴜᴄᴄᴇssғᴜʟʟʏ ʟᴇᴀᴠᴇ ᴠᴏɪᴄᴇ ᴄʜᴀᴛ\nʟᴇᴀᴠᴇᴅ ʙʏ {msg.from_user.mention}",)
+    
+
+# --------------------------------------------------------------------------------------------------------- #
+
+
+@hellbot.app.on_message(
+    filters.command(["volume",])
+    & filters.group
+    & ~Config.BANNED_USERS
+)
+async def change_volume(client, message):
+    chat_id = message.chat.id
+    args = message.text.split()
+    if len(args) == 2 and args[1].isdigit():
+        volume = int(args[1])
+        await pytgcalls.change_volume_call(chat_id, volume)
+        await message.reply(f"ᴠᴏʟᴜᴍᴇ sᴇᴛ ᴛᴏ {volume}%")
+    else:
+        await message.reply("ᴜsᴀɢᴇ: /volume [0-200]")
+
