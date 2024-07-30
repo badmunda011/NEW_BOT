@@ -103,6 +103,7 @@ pprint "API ID: "; color_reset; read api_id
 pprint "\nAPI HASH: "; color_reset; read api_hash
 pprint "\nBOT TOKEN: "; color_reset; read bot_token
 pprint "\nOWNER ID:"; color_reset; read ownid
+pprint "\nSUDO_USER:"; color_reset; read sudo_user
 pprint "\nDATABASE_URL: "; color_reset; read database_url
 pprint "\nLOGGER_ID: "; color_reset; read logger_id
 pprint "\nHELLBOT_SESSION: "; color_reset; read string_session
@@ -119,6 +120,7 @@ BOT_TOKEN = $bot_token
 DATABASE_URL = $database_url
 LOGGER_ID = $logger_id
 HELLBOT_SESSION = $string_session
+SUDO_USER = $sudo_user
 OWNER_ID = $ownid""" > .env
 clear
 
