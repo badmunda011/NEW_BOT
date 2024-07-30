@@ -4,7 +4,7 @@ from Music.core.admin_func import authorized_users, admins as a, set_admins as s
 from config import Config
 from pytgcalls import pytgcalls
 from typing import Callable
-from config import BOT_USERNAME
+from config import *
 from pyrogram import filters, Client
 from pyrogram.types import *
 from youtube_search import YoutubeSearch
