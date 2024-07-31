@@ -45,7 +45,7 @@ TgCrypto==1.2.5
 tzdata==2023.3
 tzlocal==5.0.1
 urllib3==2.0.3
-websockets==11.0.3
+websockets==12.0
 yarl==1.9.2
 youtube-search
 yt-dlp==2024.7.9
