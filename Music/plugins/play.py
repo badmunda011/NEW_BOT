@@ -59,7 +59,7 @@ useer = "NaN"
 # --------------------------------------------------------------------------------------------------------- #
 
 @hellbot.app.on_message(
-    filters.command(["play",])
+    filters.command(["playy",])
     & filters.group
     & ~Config.BANNED_USERS
 )
